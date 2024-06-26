@@ -1,5 +1,7 @@
 .SUFFIXES: .F90 .o
 
+.PHONY: physics_mmm physics_mmm_lib
+
 all: dummy physics_mmm
 
 dummy:
@@ -20,6 +22,8 @@ OBJS = \
 	module_libmassv.o
 
 physics_mmm: $(OBJS)
+
+physics_mmm_lib:
 	ar -ru ./../libphys.a $(OBJS)
 
 # DEPENDENCIES:
