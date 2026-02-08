@@ -1100,7 +1100,7 @@
  zw  = min((ustar/1.06)**(0.3),1.0)
  zn1 = 0.011*ustar*ustar/g + ozo
  zn2 = 10.*exp(-9.5*ustar**(-.3333)) + &
-       0.11*1.5e-5/amax1(ustar,0.01)
+       0.11*1.5e-5/max(ustar,0.01)
  z_0 = (1.0-zw) * zn1 + zw * zn2
 
  z_0 = max( z_0, 1.27e-7)  !these max/mins were suggested by
@@ -2033,7 +2033,7 @@
  real(kind=kind_phys):: x,ym,psimc,psimk
 
  x=(1.-16.*zolf)**.25
- psimk=2*ALOG(0.5*(1+X))+ALOG(0.5*(1+X*X))-2.*ATAN(X)+2.*ATAN(1.)
+ psimk=2*LOG(0.5*(1+X))+LOG(0.5*(1+X*X))-2.*ATAN(X)+2.*ATAN(1.)
 
  ym=(1.-10.*zolf)**0.33
  psimc=(3./2.)*log((ym**2.+ym+1.)/3.)-sqrt(3.)*ATAN((2.*ym+1)/sqrt(3.))+4.*ATAN(1.)/sqrt(3.)
