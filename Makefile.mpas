@@ -12,6 +12,7 @@ OBJS = \
 	bl_mynn.o \
 	bl_mynn_subroutines.o \
 	bl_ysu.o \
+	bl_shinhong.o \
 	cu_ntiedtke.o \
 	mp_radar.o \
 	mp_wsm6_effectRad.o \
