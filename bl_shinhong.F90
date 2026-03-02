@@ -1433,21 +1433,24 @@
      enddo
    enddo
 !
-   do k = kts,kte
-     do i = its,ite
-       if(pblflg(i).and.k < kpbl(i)) then
-         hgame_c=c_1*0.2*2.5*(g/thvx(i,k))*wstar(i)/(0.25*(q2x(i,k+1)+q2x(i,k)))
-         hgame_c=min(hgame_c,gamcre)
-         if(k == kte)then
-           hgame2d(i,k)=hgame_c*0.5*tvflux_e(i,k)*hpbl(i)
-           hgame2d(i,k)=max(hgame2d(i,k),0.0)
-         else
-           hgame2d(i,k)=hgame_c*0.5*(tvflux_e(i,k)+tvflux_e(i,k+1))*hpbl(i)
-           hgame2d(i,k)=max(hgame2d(i,k),0.0)
+   if(if_tke_diag) then
+     do k = kts,kte
+       do i = its,ite
+         if(pblflg(i).and.k < kpbl(i)) then
+           hgame_c=c_1*0.2*2.5*(g/thvx(i,k))*wstar(i)                          &
+                   /amax1((0.25*(q2x(i,k+1)+q2x(i,k))),0.01)
+           hgame_c=min(hgame_c,gamcre)
+           if(k == kte)then
+             hgame2d(i,k)=hgame_c*0.5*tvflux_e(i,k)*hpbl(i)
+             hgame2d(i,k)=max(hgame2d(i,k),0.0)
+           else
+             hgame2d(i,k)=hgame_c*0.5*(tvflux_e(i,k)+tvflux_e(i,k+1))*hpbl(i)
+             hgame2d(i,k)=max(hgame2d(i,k),0.0)
+           endif
          endif
-       endif
+       enddo
      enddo
-   enddo
+   endif
    !--- cloud water:
    if(f_qc) then
      do i = its,ite
@@ -1701,7 +1704,7 @@
        txk(k)   = tx(i,k)
        thxk(k)  = thx(i,k)
        thvxk(k) = thvx(i,k)
-       q2xk(k)  = q2x(i,k)
+       q2xk(k)  = max(q2x(i,k),0.0001)
        hgame(k) = hgame2d(i,k)
      enddo
 !
@@ -1786,7 +1789,7 @@
      kpbl1d(i) = kpbl(i)
    enddo
 !
-   errmsg = 'bl_ysu_run OK'
+   errmsg = 'bl_shinhong_run OK'
    errflg = 0
    end subroutine bl_shinhong_run
 !-------------------------------------------------------------------------------
