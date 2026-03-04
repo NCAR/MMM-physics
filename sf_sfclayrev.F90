@@ -12,6 +12,8 @@
  real(kind=kind_phys),parameter:: vconvc= 1.
  real(kind=kind_phys),parameter:: czo   = 0.0185
  real(kind=kind_phys),parameter:: ozo   = 1.59e-5
+ real(kind=kind_phys),parameter:: varf_min = 5.
+ real(kind=kind_phys),parameter:: ca_square       = 0.4 * 0.4
 
  real(kind=kind_phys),dimension(0:1000 ),save:: psim_stab,psim_unstab,psih_stab,psih_unstab
 
@@ -80,6 +82,7 @@
                              cpm,pblh,rmol,znt,ust,mavail,zol,mol,     &
                              regime,psim,psih,fm,fh,                   &
                              xland,hfx,qfx,tsk,                        &
+                             varf,if_kim_tofd,tofd_factor,             &
                              u10,v10,th2,t2,q2,flhc,flqc,qgh,          &
                              qsfc,lh,gz1oz0,wspd,br,isfflx,dx,         &
                              svp1,svp2,svp3,svpt0,ep1,ep2,             &
@@ -93,6 +96,7 @@
 
 !--- input arguments:
  logical,intent(in):: isfflx
+ logical,intent(in):: if_kim_tofd
  logical,intent(in):: shalwater_z0
  logical,intent(in),optional:: scm_force_flux
 
@@ -103,6 +107,7 @@
  real(kind=kind_phys),intent(in):: ep1,ep2,karman
  real(kind=kind_phys),intent(in):: p1000mb
  real(kind=kind_phys),intent(in):: cp,g,rovcp,r,xlv
+ real(kind=kind_phys),intent(in):: tofd_factor
 
  real(kind=kind_phys),intent(in),dimension(its:):: &
     mavail,     &
@@ -116,6 +121,7 @@
  real(kind=kind_phys),intent(in),dimension(its:):: &
     dx,         &
     dz8w1d,     &    
+    varf,       &
     ux,         &
     vx,         &
     qv1d,       &
@@ -212,8 +218,11 @@
  real(kind=kind_phys),dimension(its:ite):: &
     pq,         &
     pq2,        &
-    pq10
-
+    pq10,       &
+    cf
+ real(kind=kind_phys)                   :: zf, fri, ff, dx_factor
+!
+    cf(:) = 0.
 !-----------------------------------------------------------------------------------------------------------------
 
  do i = its,ite
@@ -695,11 +704,25 @@
 !         psiq10=gz10oz0(i)-psih(i)+2.28*sqrt(sqrt(restar))-2.
        endif
     endif
+!
+!   option for tofd as in kim model (koo et. al. 2018, koo and hong 2025)
+!   24 August 25 (hong@ucar.edu)
+!
+    if ( (if_kim_tofd) .and. varf(i).gt.varf_min ) then
+      dx_factor = varf(i)/(dx(i)/32000.+7./8.)    ! < about the same at 4 km
+      zf    = min( varf(i)*tofd_factor,za(i) )
+      fri   = min( max( 1.-br(i),0. ), 1.)
+      ff    = log( ( za(i) + zf) / zf )
+      cf(i) = ca_square / (ff*ff) * fri
+    else
+      cf(i) = 0.
+    endif
     if(present(ck) .and. present(cd) .and. present(cka) .and. present(cda)) then
+       
        ck(i)=(karman/psix10)*(karman/psiq10)
-       cd(i)=(karman/psix10)*(karman/psix10)
        cka(i)=(karman/psix)*(karman/psiq)
-       cda(i)=(karman/psix)*(karman/psix)
+       cd(i)=(karman/psix10)*(karman/psix10) + cf(i)
+       cda(i)=(karman/psix)*(karman/psix) + cf(i)
     endif
     if(present(iz0tlnd)) then
        if(iz0tlnd.ge.1 .and. (xland(i)-1.5).le.0.) then
@@ -753,7 +776,11 @@
        endif
     endif
 ! TO PREVENT OSCILLATIONS AVERAGE WITH OLD VALUE 
-    ust(i)=0.5*ust(i)+0.5*karman*wspd(i)/psix                                             
+    if ( (if_kim_tofd) .and. (cf(i).gt.1.e-20) ) then
+      ust(i)=0.5*ust(i)+0.5*karman*wspd(i)/psix+0.5*sqrt(cf(i))*wspd(i)                                             
+    else
+      ust(i)=0.5*ust(i)+0.5*karman*wspd(i)/psix                                             
+    endif
 ! TKE coupling: compute ust without vconv for use in tke scheme
     wspdi(i)=sqrt(ux(i)*ux(i)+vx(i)*vx(i))
     if(present(ustm)) then
