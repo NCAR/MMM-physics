@@ -94,6 +94,8 @@
 !    del              - positive increment of pressure across layer (pa)
 !    prslk, zl, prsl, prsi    - pressure and height variables
 !    oa4, ol4, omax, var, oc1 - orographic statistics
+!    if_nonhyd        - logical nonhydrostatic effect of xu et al.
+!    dx_factor        - effective grid spacing for gwd stress (=2, default)
 !
 !  output :
 !    dudt, dvdt - wind tendency due to gwdo
