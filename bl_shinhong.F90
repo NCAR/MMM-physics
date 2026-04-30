@@ -2256,7 +2256,7 @@
    main_integration: do k = kts+1,kte
      deltaz=0.5*(z(k+1)-z(k-1))
      s2l=s2(k)
-     q2l=q2(k)
+     q2l=max(q2(k),0.01)
      suk=(uxk(k)-uxk(k-1))/deltaz
      svk=(vxk(k)-vxk(k-1))/deltaz
      gthvk=(thvxk(k)-thvxk(k-1))/deltaz
@@ -2288,6 +2288,7 @@
 !  dissipation
 !
      disel=min(delxy,ceps*el(k))
+     disel=max(disel,0.01)
      dis=(q2l)**1.5/disel
 !
      q2l=q2l+2.0*(pr-bpr-dis)*dtturbl
