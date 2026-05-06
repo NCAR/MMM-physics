@@ -2256,7 +2256,7 @@
    main_integration: do k = kts+1,kte
      deltaz=0.5*(z(k+1)-z(k-1))
      s2l=s2(k)
-     q2l=max(q2(k),0.01)
+     q2l=max(q2(k),epsq2l)
      suk=(uxk(k)-uxk(k-1))/deltaz
      svk=(vxk(k)-vxk(k-1))/deltaz
      gthvk=(thvxk(k)-thvxk(k-1))/deltaz
