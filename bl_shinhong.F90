@@ -1002,7 +1002,7 @@
                      - (thlix(i,k) + thx(i,k)  *ep1*(qvx(i,k)  +qcxl(i,k)))
            dthvx(i)  = max(dthvx(i),0.1)
            evp_fac   = xlv/cp * rcldb/(pi2d(i,k)*dthvx(i))
-           ent_eff   = min(0.2 * (1.+8.*evp_fac),scu_ent_max)
+           ent_eff   = min(0.2*8.*evp_fac,scu_ent_max)
 !
            radsum = 0.
            do kk = 1,k
