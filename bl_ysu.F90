@@ -852,7 +852,7 @@
                           - (thlix(i,k) + thx(i,k)  *ep1*(qvx(i,k)  +qcxl(i,k)))
                 dthvx(i)  = max(dthvx(i),0.1)
                 tmp1      = xlv/cp * rcldb/(pi2d(i,k)*dthvx(i))
-                ent_eff   = 0.2 * 8. * tmp1
+                ent_eff   = min(0.2 * 8. * tmp1, 0.4)
 
                 radsum=0.
                 do kk = 1,kpbl(i)-1
