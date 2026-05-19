@@ -1437,7 +1437,7 @@
      do i = its,ite
        if(pblflg(i).and.k < kpbl(i)) then
          hgame_c=c_1*0.2*2.5*(g/thvx(i,k))*wstar(i)                            &
-                 /amax1((0.25*(q2x(i,k+1)+q2x(i,k))),0.01)
+                 /max((0.25*(q2x(i,k+1)+q2x(i,k))),0.01)
          hgame_c=min(hgame_c,gamcre)
          if(k == kte)then
            hgame2d(i,k)=hgame_c*0.5*tvflux_e(i,k)*hpbl(i)
@@ -1771,7 +1771,7 @@
 !---- save the new tke and mixing length.
 !
      do k = kts,kte
-       q2x(i,k) = amax1(q2xk(k),epsq2l)
+       q2x(i,k) = max(q2xk(k),epsq2l)
        tke(i,k) = 0.5*q2x(i,k)
        if(k/=kts) el_pbl(i,k) = el(k) ! el is not defined at kte
      enddo
@@ -2256,7 +2256,7 @@
    main_integration: do k = kts+1,kte
      deltaz=0.5*(z(k+1)-z(k-1))
      s2l=s2(k)
-     q2l=q2(k)
+     q2l=max(q2(k),epsq2l)
      suk=(uxk(k)-uxk(k-1))/deltaz
      svk=(vxk(k)-vxk(k-1))/deltaz
      gthvk=(thvxk(k)-thvxk(k-1))/deltaz
@@ -2288,10 +2288,11 @@
 !  dissipation
 !
      disel=min(delxy,ceps*el(k))
+     disel=max(disel,0.01)
      dis=(q2l)**1.5/disel
 !
      q2l=q2l+2.0*(pr-bpr-dis)*dtturbl
-     q2(k)=amax1(q2l,epsq2l)
+     q2(k)=max(q2l,epsq2l)
 !
 !  end of production/dissipation loop
 !
@@ -2299,7 +2300,7 @@
 !
 !  lower boundary condition for q2
 !
-   q2(kts)=amax1(rc02*ustar*ustar,epsq2l)
+   q2(kts)=max(rc02*ustar*ustar,epsq2l)
 !
    end subroutine prodq2
 !-------------------------------------------------------------------------------
