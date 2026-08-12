@@ -11,12 +11,16 @@
 !>\section arg_table_bl_shinhong_init
 !!\html\include bl_shinhong_init.html
 !!
- subroutine bl_shinhong_init(errmsg,errflg)
+ subroutine bl_shinhong_init(errmsg,errflg,tke, kms, kme, ims, ime)
 !===============================================================================
+ integer, intent (in) :: kms, kme, ims, ime
+ real, dimension( kms:kme, ims:ime ), intent(inout) :: &
+                                                       tke
 !--- output arguments:
  character(len=*),intent(out):: errmsg
  integer,intent(out):: errflg
 !-------------------------------------------------------------------------------
+ tke(:,:) = 1.e-10
  errmsg = 'bl_shinhong_init OK'
  errflg = 0
  end subroutine bl_shinhong_init
@@ -91,6 +95,9 @@
 !       ==> removes numerical instability for mixed clouds when t << 0c
 !     merged shinghong and ysu pbl schemes
 !       ==> reproduces ysupbl with scale aware if_shinhong_nonlocal_flux = .false.
+!     08-15-2026, songyou hong
+!     revised scu topdown mixing in determining cloud top and velocity scale etc 
+!       ==> prevents occasional crashed, alleviates overestimated mixing
 !
 !     ysupbl:
 !     coded by song-you hong (yonsei university) and implemented by
@@ -136,13 +143,13 @@
                         gamcrq  = 2.e-3   ,&
                         xka     = 2.4e-5  ,&
                         qci_cr  = 0.01e-3 ,&  !< a threshold amount for scu
+                        qmin    = 1.e-15  ,&
                         rcl     = 1.0
    integer,parameter ::                    &
                         kts     = 1       ,&
                         kms     = 1
 !
 !  parameters for nonlocal transport profile (sh15)
-!
    real(kind=kind_phys),parameter    ::  mltop = 1.0
    real(kind=kind_phys),parameter    ::  sfcfracn1 = 0.075, entfracn1 = 0.87
    real(kind=kind_phys),parameter    ::  fent = 2.0, cent = -0.2
@@ -150,11 +157,9 @@
    real(kind=kind_phys),parameter    ::  a11 = 1.0,a12 = -1.15
 !
 !  maximum entrainment ratio for scu induced downdraft
-!
    real(kind=kind_phys),parameter    ::  scu_ent_max = 0.4
 !
 !  tunable parameters for tke computation
-!
    real(kind=kind_phys),parameter    ::  epsq2l = 0.01,c_1 = 1.0,gamcre = 0.224
 !
    logical,parameter            ::    &
@@ -200,7 +205,6 @@
 !
    real(kind=kind_phys),     dimension( its:,:,: )                           , &
              intent(out  )   ::                                       qmixtnp
-!
 !
    real(kind=kind_phys),     dimension( its: )                               , &
              intent(out  ), optional ::                                 dusfc, &
@@ -293,9 +297,9 @@
    real(kind=kind_phys)    ::  mlfrac,ezfrac,sfcfracn
    real(kind=kind_phys)    ::  uwst,uwstx,csfac
    real(kind=kind_phys)    ::  prnumfac,bfx0,hfx0,qfx0,delb,dux,dvx,           &
-               dsdzu,dsdzv,wm3,dthx,dqx,wspd10,ross,tem1,dsig,tvcon,conpr,     &
-               prfac,prfac2,phim8z,radsum,ent_eff,radflx,hvalue,tau0
-   real(kind=kind_phys)    :: evp_fac,tlix,rvls,temps, rcldb,bruptmp
+               dsdzu,dsdzv,wm3,wm3_scu,dthx,dqx,wspd10,ross,tem1,dsig,tvcon,   &
+               conpr,prfac,prfac2,phim8z,radsum,ent_eff,radflx,hvalue,tau0
+   real(kind=kind_phys)    :: evp_fac,tlix,rvls,temps, rcldb
 !
    integer,  dimension( its:ite )            ::                     kpbl, kcld
    real(kind=kind_phys),     dimension( its:ite )            ::                &
@@ -397,14 +401,6 @@
                                                                          uoxl, &
                                                                          voxl
 !
-   logical,  dimension( its:ite )             ::                       pblflg, &
-                                                                       sfcflg, &
-                                                                       stable, &
-                                                                     cloudflg
-!
-   logical                                    ::                               &
-                                                                   definebrup
-!
 !  bep parameterization
 !
    real(kind=kind_phys)      ::                                      bepswitch
@@ -414,11 +410,13 @@
    real(kind=kind_phys),    dimension( its:ite )             ::                &
                frc_urb1d
 !
-!-------------------------------------------------------------------------------
+   logical,  dimension( its:ite )             ::                       pblflg, &
+                                                                       sfcflg, &
+                                                                       stable, &
+                                                                     cloudflg
 !
-   klpbl = kte
-   lmh = 1
-   lmxl = 1
+!-------------------------------------------------------------------------------
+! compute preliminary variables
 !
    cont   = cp/g
    conq   = xlv/g
@@ -426,7 +424,134 @@
    conwrc = conw*sqrt(rcl)
    conpr  = bfac*karman*sfcfrac
 !
-!  k-start index for cloud and rain
+   dtstep = dt
+   dt2 = 2.*dtstep
+   rdt = 1./dt2
+   klpbl = kte
+   lmh = 1
+   lmxl = 1
+!
+!-----initialize vertical tendencies for mpas or wrf
+!
+   utnp(its:ite,:) = 0.
+   vtnp(its:ite,:) = 0.
+   ttnp(its:ite,:) = 0.
+   qvtnp(its:ite,:) = 0.
+   qctnp(its:ite,:) = 0.
+   qitnp(its:ite,:) = 0.
+   qmixtnp(its:ite,:,:) = 0.
+!
+!-----initialize local variables
+!
+   do k = kts,kte
+     do i = its,ite
+       exch_hx(i,k) = 0.
+       exch_mx(i,k) = 0.
+       xkzh(i,k)    = 0.
+       xkzhl(i,k)   = 0.
+       xkzm(i,k)    = 0.
+       xkzml(i,k)   = 0.
+       xkzq(i,k)    = 0.
+     enddo
+   enddo
+!
+   do i = its,ite
+     we(i)  = 0.
+     hgamt(i)  = 0.
+     hgamq(i)  = 0.
+     wscale(i) = 0.
+     kpbl(i)   = 1
+     kcld(i)   = 1
+     bfxpbl(i) = 0.0
+     hfxpbl(i) = 0.0
+     qfxpbl(i) = 0.0
+     ufxpbl(i) = 0.0
+     vfxpbl(i) = 0.0
+     hgamu(i)  = 0.0
+     hgamv(i)  = 0.0
+     delta(i)  = 0.0
+     delta_sh(i)  = 0.0
+     wstar(i) =  0.0
+     wstar3(i) =  0.0
+     wstar3_2(i) =  0.0
+     hfxpbl_sh(i) = 0.0
+     dthvx(i) = 0.0
+   enddo
+!
+   do k = kts,klpbl
+     do i = its,ite
+       tflux(i,k) = 0.0
+       qflux(i,k) = 0.0
+       uflux(i,k) = 0.0
+       vflux(i,k) = 0.0
+       wscalek(i,k) = 0.0
+       wscalek2(i,k) = 0.0
+       dishx(i,k) = 0.0
+     enddo
+   enddo
+!
+   do k = kts,klpbl
+     do i = its,ite
+       zfac(i,k) = 0.0
+       zfac2(i,k) = 0.0
+       zfacent(i,k) = 0.0
+       qci(i,k) = 0.0
+       qcxl(i,k) = 0.0
+       qixl(i,k) = 0.0
+       thlix(i,k) = 0.0
+       thlvx(i,k) = 0.0
+     enddo
+   enddo
+   do k = kts,kte+1
+     do i = its,ite
+       dishxi(i,k) = 0.0
+     enddo
+   enddo
+!
+   do i = its,ite
+     efxpbl(i)   = 0.0
+     hpbl_cbl(i) = 0.0
+     epshol(i)   = 0.0
+     ct(i)       = 0.0
+   enddo
+!
+   do i = its,ite
+     deltaoh(i)  = 0.0
+     entfrac(i) = 0.0
+     cslen(i)    = 0.0
+   enddo
+   do k = kts,kte
+     do i = its,ite
+       q2x(i,k) = 2.*tke(i,k)
+     enddo
+   enddo
+!
+   do k = kts,kte
+     do i = its,ite
+       el_pbl(i,k)   = 0.0
+       hgame2d(i,k)  = 0.0
+       tflux_e(i,k)  = 0.0
+       qflux_e(i,k)  = 0.0
+       tvflux_e(i,k) = 0.0
+     enddo
+   enddo
+!
+   do k = kts,kte
+     do i = its,ite
+       mf(i,k)     = 0.0
+       zfacmf(i,k) = 0.0
+       entfacmf(i,k) = 0.0
+     enddo
+   enddo
+!
+   do i = its,ite
+     if(present(dusfc)) dusfc(i) = 0.
+     if(present(dvsfc)) dvsfc(i) = 0.
+     if(present(dtsfc)) dtsfc(i) = 0.
+     if(present(dqsfc)) dqsfc(i) = 0.
+   enddo
+!
+!  assign cloud and sea ice varaibles
 !
    if(f_qc) then
       do k = kts,kte
@@ -456,21 +581,6 @@
       enddo
    endif
 !
-   do k = kts,kte
-     do i = its,ite
-       thx(i,k) = tx(i,k)/pi2d(i,k)
-       thlix(i,k) = (tx(i,k)-xlv*qcxl(i,k)/cp-2.834E6*qixl(i,k)/cp)/pi2d(i,k)
-       qci(i,k) = qcxl(i,k) + qixl(i,k)
-     enddo
-   enddo
-!
-   do k = kts,kte
-     do i = its,ite
-       tvcon = (1.+ep1*qvx(i,k))
-       thvx(i,k) = thx(i,k)*tvcon
-     enddo
-   enddo
-!
    if ( present(uox) .and. present(vox) ) then
       do i =its,ite
          uoxl(i) = uox(i)
@@ -481,20 +591,6 @@
          uoxl(i) = 0
          voxl(i) = 0
       enddo
-   endif
-!
-   do i = its,ite
-     tvcon = (1.+ep1*qvx(i,1))
-     rhox(i) = psfcpa(i)/(rd*tx(i,1)*tvcon)
-     govrth(i) = g/thx(i,1)
-   enddo
-!
-   if(if_scale_aware) then
-     do i = its,ite
-       dxy(i) = dxmeter(i)
-     enddo
-   else
-      dxy(:) = 100.e3 !< 100 km is the scale for fully parameterized
    endif
 !
 !  setting bep/bep+bem forcing variables
@@ -552,8 +648,38 @@
       enddo
    endif
 !
-!-----compute the height of full- and half-sigma levels above ground
-!     level, and the layer thicknesses.
+   if(if_scale_aware) then
+     do i = its,ite
+       dxy(i) = dxmeter(i)
+     enddo
+   else
+      dxy(:) = 100.e3 !< 100 km is the scale for fully parameterized
+   endif
+!
+!---compute thermodynamic variables and the height of full- and half-sigma 
+!   levels above ground
+!
+   do k = kts,kte
+     do i = its,ite
+       thx(i,k) = tx(i,k)/pi2d(i,k)
+       thlix(i,k) = thx(i,k) - xlv*qcxl(i,k)/cp-2.834E6*qixl(i,k)/cp
+       qci(i,k) = qcxl(i,k) + qixl(i,k)
+     enddo
+   enddo
+!
+   do k = kts,kte
+     do i = its,ite
+       tvcon = (1.+ep1*qvx(i,k))
+       thvx(i,k) = thx(i,k)*tvcon
+       thlvx(i,k) = thlix(i,k)*tvcon
+     enddo
+   enddo
+!
+   do i = its,ite
+     tvcon = (1.+ep1*qvx(i,1))
+     rhox(i) = psfcpa(i)/(rd*tx(i,1)*tvcon)
+     govrth(i) = g/thx(i,1)
+   enddo
 !
    do i = its,ite
      zq(i,1) = 0.
@@ -585,124 +711,12 @@
      enddo
    enddo
 !
-!-----initialize vertical tendencies for mpas or wrf
-!
-   utnp(its:ite,:) = 0.
-   vtnp(its:ite,:) = 0.
-   ttnp(its:ite,:) = 0.
-   qvtnp(its:ite,:) = 0.
-   qctnp(its:ite,:) = 0.
-   qitnp(its:ite,:) = 0.
-   qmixtnp(its:ite,:,:) = 0.
-!
-!-----initialize output and local exchange coefficents:
-!
-   do k = kts,kte
-     do i = its,ite
-       exch_hx(i,k) = 0.
-       exch_mx(i,k) = 0.
-       xkzh(i,k)    = 0.
-       xkzhl(i,k)   = 0.
-       xkzm(i,k)    = 0.
-       xkzml(i,k)   = 0.
-       xkzq(i,k)    = 0.
-     enddo
-   enddo
-!
    do i = its,ite
      wspd1(i) = sqrt( (ux(i,1)-uoxl(i))*(ux(i,1)-uoxl(i)) + (vx(i,1)-voxl(i))  &
                 *(vx(i,1)-voxl(i)) )+1.e-9
    enddo
 !
-!
-!---- compute vertical diffusion
-!
-! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-! compute preliminary variables
-!
-   dtstep = dt
-   dt2 = 2.*dtstep
-   rdt = 1./dt2
-!
-!
-   do i = its,ite
-     bfxpbl(i) = 0.0
-     hfxpbl(i) = 0.0
-     qfxpbl(i) = 0.0
-     ufxpbl(i) = 0.0
-     vfxpbl(i) = 0.0
-     hgamu(i)  = 0.0
-     hgamv(i)  = 0.0
-     delta(i)  = 0.0
-     delta_sh(i)  = 0.0
-     wstar3(i) =  0.0
-     wstar3_2(i) =  0.0
-     hfxpbl_sh(i) = 0.0
-   enddo
-!
-   do k = kts,klpbl
-     do i = its,ite
-       tflux(i,k) = 0.0
-       qflux(i,k) = 0.0
-       uflux(i,k) = 0.0
-       vflux(i,k) = 0.0
-       wscalek(i,k) = 0.0
-       wscalek2(i,k) = 0.0
-       dishx(i,k) = 0.0
-     enddo
-   enddo
-!
-   do k = kts,klpbl
-     do i = its,ite
-       zfac(i,k) = 0.0
-       zfac2(i,k) = 0.0
-     enddo
-   enddo
-   do k = kts,kte+1
-     do i = its,ite
-       dishxi(i,k) = 0.0
-     enddo
-   enddo
-!
-!  for scale-aware turbulence
-!
-   do i = its,ite
-     efxpbl(i)   = 0.0
-     hpbl_cbl(i) = 0.0
-     epshol(i)   = 0.0
-     ct(i)       = 0.0
-   enddo
-!
-   do i = its,ite
-     deltaoh(i)  = 0.0
-     entfrac(i) = 0.0
-     cslen(i)    = 0.0
-   enddo
-   do k = kts,kte
-     do i = its,ite
-       q2x(i,k) = 2.*tke(i,k)
-     enddo
-   enddo
-!
-   do k = kts,kte
-     do i = its,ite
-       el_pbl(i,k)   = 0.0
-       hgame2d(i,k)  = 0.0
-       tflux_e(i,k)  = 0.0
-       qflux_e(i,k)  = 0.0
-       tvflux_e(i,k) = 0.0
-     enddo
-   enddo
-!
-   do k = kts,kte
-     do i = its,ite
-       mf(i,k)     = 0.0
-       zfacmf(i,k) = 0.0
-       entfacmf(i,k) = 0.0
-     enddo
-   enddo
-!
-!  initialize
+!  background diffusion coefficients
 !
    do k = kts,klpbl-1
      do i = its,ite
@@ -711,24 +725,14 @@
      enddo
    enddo
 !
-   do i = its,ite
-     if(present(dusfc)) dusfc(i) = 0.
-     if(present(dvsfc)) dvsfc(i) = 0.
-     if(present(dtsfc)) dtsfc(i) = 0.
-     if(present(dqsfc)) dqsfc(i) = 0.
-   enddo
+!  assign the surface variables
 !
    do i = its,ite
-     we(i)  = 0.
-     hgamt(i)  = 0.
-     hgamq(i)  = 0.
-     wscale(i) = 0.
-     kpbl(i)   = 1
      hpbl(i)   = zq(i,1)
      hpbl_cbl(i) = zq(i,1)
      zl1(i)    = za(i,1)
      thermal(i)= thvx(i,1)
-     thermalli(i) = thlix(i,1)
+     thermalli(i) = thlvx(i,1)
      pblflg(i) = .true.
      sfcflg(i) = .true.
      sflux(i) = hfx(i)/rhox(i)/cp + qfx(i)/rhox(i)*ep1*thx(i,1)
@@ -802,8 +806,7 @@
      wscale(i) = max(wscale(i),ust(i)/aphi5)
    enddo
 !
-!  compute the surface variables for pbl height estimation
-!  under unstable conditions
+!  compute the surface variables under unstable conditions
 !
    do i = its,ite
      if(sfcflg(i).and.sflux(i) > 0.0) then
@@ -852,27 +855,24 @@
      enddo
    enddo
 !
-!  enhance pbl by theta-li in case of scu topdown mixing
+!  computes the stratus cumulus top for topdown mixing
 !
-   if (if_scu_mixing) then
+   if (if_scu_mixing) then ! theta-li in case of scu topdown mixing
      do i = its,ite
-       kcld(i) = kpbl(i)
-       definebrup=.false.
-       do k = 2,klpbl
-         if(k >= kcld(i))then
+       if(pblflg(i)) then
+         stable(i) = .false.
+         brup(i) = brdn(i)
+       endif
+     enddo
+!
+     do k = 2,klpbl
+       do i = its,ite
+         if(.not.stable(i).and.k >= kpbl(i))then
+           brdn(i) = brup(i)
            spdk2   = max(ux(i,k)**2+vx(i,k)**2,1.)
-           bruptmp = (thlix(i,k)-thermalli(i))*(g*za(i,k)/thlix(i,1))/spdk2
-           stable(i) = bruptmp >= brcr(i)
-           if (definebrup) then
-             kpbl(i) = k
-             brup(i) = bruptmp
-             definebrup=.false.
-           endif
-           if (.not.stable(i)) then !overwrite brup brdn values
-             brdn(i)=bruptmp
-             definebrup=.true.
-             pblflg(i)=.true.
-           endif
+           brup(i) = (thlvx(i,k)-thermalli(i))*(g*za(i,k)/thlvx(i,1))/spdk2
+           kpbl(i) = k
+           stable(i) = brup(i) > brcr(i)
          endif
        enddo
      enddo
@@ -892,7 +892,7 @@
        if(hpbl(i) < zq(i,2)) kpbl(i) = 1
        if(kpbl(i) <= 1) pblflg(i) = .false.
 !
-       if (wstar(i)  /=  0) then
+       if (abs(wstar(i))  >  qmin) then
          uwst  = abs(ust(i)/wstar(i)-0.5)
          uwstx = -80.*uwst+14.
          csfac = 0.5*(tanh(uwstx)+3.)
@@ -946,6 +946,28 @@
      enddo
    enddo
 !
+!  computes the stratus cumulus top for topdown mixing
+!
+   if (if_scu_mixing) then ! theta-li in case of scu topdown mixing
+     do i = its,ite
+       if((.not.sfcflg(i)).and.hpbl(i) < zq(i,2)) then
+         stable(i) = .false.
+         brup(i) = brdn(i)
+       endif
+     enddo
+     do k = 2,klpbl
+       do i = its,ite
+         if(.not.stable(i).and.k >= kpbl(i))then
+           brdn(i) = brup(i)
+           spdk2   = max(ux(i,k)**2+vx(i,k)**2,1.)
+           brup(i) = (thlvx(i,k)-thermalli(i))*(g*za(i,k)/thlix(i,1))/spdk2
+           kpbl(i) = k
+           stable(i) = brup(i) > brcr(i)
+         endif
+       enddo
+     enddo
+   endif
+!
    do i = its,ite
      if((.not.sfcflg(i)).and.hpbl(i) < zq(i,2)) then
        k = kpbl(i)
@@ -962,23 +984,12 @@
      endif
    enddo
 !
-!  scale dependency for nonlocal momentum and moisture transport
-!
-   do i = its,ite
-     pu1 = pu(dxy(i),cslen(i))
-     pq1 = pq(dxy(i),cslen(i))
-     if(pblflg(i)) then
-       hgamu(i) = hgamu(i)*pu1
-       hgamv(i) = hgamv(i)*pu1
-       hgamq(i) = hgamq(i)*pq1
-     endif
-   enddo
-!
 !  estimate the entrainment fluxes for both bottom up and topdown mixing
 !
    do i = its,ite
      cloudflg(i)=.false.
      if(pblflg(i)) then
+       wm3 = 0.; wm3_scu = 0.
        k = kpbl(i) - 1
        wm3       = wstar3(i) + 5.*ust3(i)
        wm2(i)    = wm3**h2
@@ -989,30 +1000,33 @@
          if ( kpbl(i)  >=  2) then
            cloudflg(i) = .true.
            tlix = thlix(i,k)*(p2di(i,k+1)/100000)**rovcp
-           !rvls is ws at full level
+!
+! cloud properties
            rvls = 100.*6.112*EXP(17.67*(tlix-273.16)/(tlix-29.65))             &
                   *(ep2/p2di(i,k+1))
            temps = tlix + ((qvx(i,k)+qcxl(i,k))-rvls)/(cp/xlv                  &
                   + ep2*xlv*rvls/(rd*tlix**2))
            rvls = 100.*6.112*EXP(17.67*(temps-273.15)/(temps-29.65))           &
                   *(ep2/p2di(i,k+1))
-           rcldb = max((qvx(i,k)+qcxl(i,k))-rvls,0.)
-           !entrainment efficiency
+           rcldb = max((qvx(i,k)+qcxl(i,k))-rvls,0.) !< clouds after mixing
+!
+!  entrainment efficiency
            dthvx(i)  = (thlix(i,k+2)+thx(i,k+2)*ep1*(qvx(i,k+2)+qcxl(i,k+2)))  &
                      - (thlix(i,k) + thx(i,k)  *ep1*(qvx(i,k)  +qcxl(i,k)))
            dthvx(i)  = max(dthvx(i),0.1)
-           evp_fac   = xlv/cp * rcldb/(pi2d(i,k)*dthvx(i))
-           ent_eff   = min(0.2*8.*evp_fac,scu_ent_max)
+           evp_fac   = xlv/cp * rcldb/(pi2d(i,k)*dthvx(i)) !< evaporation factor
+           ent_eff = min(0.2*8.*evp_fac,scu_ent_max) !< entraiment efficiencies
 !
+!  radiative cooling rate
            radsum = 0.
            do kk = 1,k
              radflx = rthraten(i,kk)*pi2d(i,kk) !converts theta/s to temp/s
              radflx = radflx*cp/g*(p2di(i,kk)-p2di(i,kk+1)) ! converts to W/m^2
-             if (radflx < 0.0 ) radsum=abs(radflx)+radsum
+             if (radflx < 0.0 ) radsum= abs(radflx)+radsum
            enddo
            radsum=max(radsum,0.0)
 !
-           !recompute entrainment from sfc thermals
+!  recompute entrainment from sfc thermals
            bfx0 = max(sflux(i),0.0)
            wm3 = (govrth(i)*bfx0*hpbl(i)) + 5.*ust3(i)
            wm2(i)    = wm3**h2
@@ -1020,17 +1034,16 @@
            dthvx(i)  = max(thvx(i,k+1)-thvx(i,k),tmin)
            we(i) = max(bfxpbl(i)/dthvx(i),-sqrt(wm2(i)))
 !
-           !entrainment from PBL top thermals
+!  entrainment from PBL top thermals
            bfx0 = max(radsum/rhox2(i,k)/cp,0.)
-           wm3       = (g/thvx(i,k)*bfx0*hpbl(i)) ! this is wstar3(i)
-           wm2(i)    = wm2(i)+wm3**h2
+           wm3_scu   = (g/thvx(i,k)*bfx0*hpbl(i)) ! this is wstar3(i)
+           wm2(i)    = wm2(i) + wm3_scu**h2
            bfxpbl(i) = - ent_eff * bfx0
            dthvx(i)  = max(thvx(i,k+1)-thvx(i,k),0.1)
-           we(i) = we(i) + max(bfxpbl(i)/dthvx(i),-sqrt(wm3**h2))
+           we(i) = we(i) + max(bfxpbl(i)/dthvx(i),-sqrt(wm3_scu**h2))
 !
-           !wstar3_2
-           wstar3_2(i) =  (g/thvx(i,k)*bfx0*hpbl(i))
-           !recompute hgamt
+!  wstar3_2 and revsied wscale and hgamma 
+           wstar3_2(i) = (g/thvx(i,k)*bfx0*hpbl(i))
            wscale(i) = (ust3(i)+phifac*karman*(wstar3(i)+wstar3_2(i))*0.5)**h1
            wscale(i) = min(wscale(i),ust(i)*aphi16)
            wscale(i) = max(wscale(i),ust(i)/aphi5)
@@ -1071,30 +1084,44 @@
        else
          vfxpbl(i) = 0.0
        endif
-       if (if_shinhong_nonlocal_flux) then
-!
-!  entrainment depth (delta_sh) is explicitly defined by SH 15 (fig.2c)
-!
-         delta_sh(i) = (mltop-entfracn1)*hpbl(i)
-         deltaoh(i) = delta_sh(i)/hpbl(i)
-!
-!  entrainment ratio is a function of surface fluxes (moeng and sullivan 1994)
-!
-         entfrac(i) = cent * fent * min(wm3/wstar3(i),2.)
-       endif
        delb  = govrth(i)*d3*hpbl(i)
        delta(i) = min(d1*hpbl(i) + d2*wm2(i)/delb,100.)
      endif
    enddo
 !
+!  scale dependency for nonlocal momentum and moisture (not used)
+!
+   do i = its,ite
+     if(pblflg(i)) then
+       pu1 = pu(dxy(i),cslen(i))
+       pq1 = pq(dxy(i),cslen(i))
+       hgamu(i) = hgamu(i)*pu1
+       hgamv(i) = hgamv(i)*pu1
+       hgamq(i) = hgamq(i)*pq1
+     endif
+   enddo
+!
+   if (if_shinhong_nonlocal_flux) then
+     do i = its,ite
+       if (pblflg(i)) then
+!
+!  entrainment depth (delta_sh) is explicitly defined by SH 15 (fig.2c)
+         delta_sh(i) = (mltop-entfracn1)*hpbl(i)
+         deltaoh(i) = delta_sh(i)/hpbl(i)
+!
+!  entrainment ratio is a function of surface fluxes (moeng and sullivan 1994)
+         hvalue = 1. + 5.*ust3(i)/max(wstar3(i),qmin)
+         entfrac(i) = cent * fent * min(hvalue,2.)
+         do k = kts,klpbl
+           entfacmf(i,k) = sqrt(((zq(i,k+1)-hpbl(i))/delta_sh(i))**2.)
+         enddo
+       endif
+     enddo
+   endif
+!
    do k = kts,klpbl
      do i = its,ite
-       if (if_shinhong_nonlocal_flux) then
-         if(pblflg(i))then
-           entfacmf(i,k) = sqrt(((zq(i,k+1)-hpbl(i))/delta_sh(i))**2.)
-         endif
-       endif
-       if(pblflg(i).and.k >= kpbl(i))then
+       if (pblflg(i) .and. k >= kpbl(i)) then
          entfac(i,k) = ((zq(i,k+1)-hpbl(i))/delta(i))**2.
        else
          entfac(i,k) = 1.e30
@@ -1194,41 +1221,42 @@
        endif
      enddo
    enddo
-   if (if_shinhong_nonlocal_flux) then
 !
 !  prescribe nonlocal heat transport below pbl (sh15)
 !
+   if (if_shinhong_nonlocal_flux) then
      do i = its,ite
-       mlfrac      = mltop-deltaoh(i)
-       ezfrac      = mltop+deltaoh(i)
-       zfacmf(i,1) = min(max((zq(i,2)/hpbl(i)),zfmin),1.)
-       sfcfracn    = max(sfcfracn1,zfacmf(i,1))
+       if (pblflg(i)) then
+         mlfrac      = mltop-deltaoh(i)
+         ezfrac      = mltop+deltaoh(i)
+         zfacmf(i,1) = min(max((zq(i,2)/hpbl(i)),zfmin),1.)
+         sfcfracn    = max(sfcfracn1,zfacmf(i,1))
 !
-       sflux0      = (a11+a12*sfcfracn)*sflux(i)
-       snlflux0    = nlfrac*sflux0
-       amf1        = snlflux0/sfcfracn
-       if (pblflg(i).and.sflux(i) > 0.) then
-         amf2      = -snlflux0/(mlfrac-sfcfracn)
-         bmf2      = -mlfrac*amf2
-         amf3      = snlflux0*entfrac(i)/deltaoh(i)
-       else
-         amf3      = 0.
-       endif
-       bmf3        = -amf3*mlfrac
-       hfxpbl_sh(i)   = amf3+bmf3
-!
-       do k = kts,klpbl
-         zfacmf(i,k) = max((zq(i,k+1)/hpbl(i)),zfmin)
-         if(pblflg(i).and.k < kpbl(i)) then
-           if(zfacmf(i,k) <= sfcfracn) then
-             mf(i,k) = amf1*zfacmf(i,k)
-           else if (zfacmf(i,k) <= mlfrac) then
-             mf(i,k) = amf2*zfacmf(i,k)+bmf2
-           endif
-           mf(i,k) = mf(i,k)+hfxpbl_sh(i)*exp(-entfacmf(i,k))
-!!!           mf(i,k) = mf(i,k)*pth1
+         sflux0      = (a11+a12*sfcfracn)*sflux(i)
+         snlflux0    = nlfrac*sflux0
+         amf1        = snlflux0/sfcfracn
+         if (sflux(i) > 0.) then
+           amf2      = -snlflux0/(mlfrac-sfcfracn)
+           bmf2      = -mlfrac*amf2
+           amf3      = snlflux0*entfrac(i)/deltaoh(i)
+         else
+           amf3      = 0.
          endif
-       enddo
+         bmf3        = -amf3*mlfrac
+         hfxpbl_sh(i)   = amf3+bmf3
+!
+         do k = kts,klpbl
+           zfacmf(i,k) = max((zq(i,k+1)/hpbl(i)),zfmin)
+           if(pblflg(i).and.k < kpbl(i)) then
+             if(zfacmf(i,k) <= sfcfracn) then
+               mf(i,k) = amf1*zfacmf(i,k)
+             else if (zfacmf(i,k) <= mlfrac) then
+               mf(i,k) = amf2*zfacmf(i,k)+bmf2
+             endif
+             mf(i,k) = mf(i,k)+hfxpbl_sh(i)*exp(-entfacmf(i,k))
+           endif
+         enddo
+       endif
      enddo
    endif
 !
@@ -1261,6 +1289,7 @@
            hvalue = mf(i,k)/xkzh(i,k)
          else
            hvalue = hgamt(i)/hpbl(i)+hfxpbl(i)*zfacent(i,k)/xkzh(i,k)
+           mf(i,k) = hvalue * xkzh(i,k)
          endif
          dsdzt = tem1*(-hvalue*pth1)
          f1(i,k)   = f1(i,k)+dtodsd*dsdzt
@@ -1432,12 +1461,14 @@
        tvflux_e(i,k) = tflux_e(i,k) + qflux_e(i,k)*ep1*thx(i,k)
      enddo
    enddo
-!
+!  
+!  for tke diagnostics
+! 
    do k = kts,kte
      do i = its,ite
        if(pblflg(i).and.k < kpbl(i)) then
          hgame_c=c_1*0.2*2.5*(g/thvx(i,k))*wstar(i)                            &
-                 /max((0.25*(q2x(i,k+1)+q2x(i,k))),0.01)
+                  /max((0.25*(q2x(i,k+1)+q2x(i,k))),0.01)
          hgame_c=min(hgame_c,gamcre)
          if(k == kte)then
            hgame2d(i,k)=hgame_c*0.5*tvflux_e(i,k)*hpbl(i)
@@ -1449,7 +1480,9 @@
        endif
      enddo
    enddo
-   !--- cloud water:
+!  
+!  cloud ice and water
+! 
    if(f_qc) then
      do i = its,ite
        do k = kts,kte
@@ -1466,7 +1499,6 @@
        enddo
      enddo
    endif
-   !--- cloud ice:
    if(f_qi) then
      do i = its,ite
        do k = kts,kte
@@ -1483,8 +1515,9 @@
        enddo
      enddo
    endif
-   !--- chemical species and/or passive tracers, meaning all variables
-   !    that we want to be vertically-mixed
+!
+!--- chemical species and/or passive tracers, meaning all variables
+!
    do n = 1, nmix
      do k = kts,kte
        do i = its,ite
@@ -1787,7 +1820,7 @@
      kpbl1d(i) = kpbl(i)
    enddo
 !
-   errmsg = 'bl_ysu_run OK'
+   errmsg = 'bl_shinhong_run OK'
    errflg = 0
    end subroutine bl_shinhong_run
 !-------------------------------------------------------------------------------
@@ -1798,21 +1831,21 @@
 !
    integer, intent(in )      ::     its,ite, kts,kte, nt
 !
-   real, dimension( its:ite, kts+1:kte+1 )                                   , &
+   real(kind=kind_phys), dimension( its:ite, kts+1:kte+1 )                   , &
          intent(in   )  ::                                                 cl
 !
-   real, dimension( its:ite, kts:kte )                                       , &
+   real(kind=kind_phys), dimension( its:ite, kts:kte )                       , &
          intent(in   )  ::                                                 cm, &
                                                                           cm1, &
                                                                            r1
-   real, dimension( its:ite, kts:kte,nt )                                    , &
+   real(kind=kind_phys), dimension( its:ite, kts:kte,nt )                    , &
          intent(in   )  ::                                                 r2
 !
-   real, dimension( its:ite, kts:kte )                                       , &
+   real(kind=kind_phys), dimension( its:ite, kts:kte )                       , &
          intent(inout)  ::                                                 au, &
                                                                            cu, &
                                                                            f1
-   real, dimension( its:ite, kts:kte,nt )                                    , &
+   real(kind=kind_phys), dimension( its:ite, kts:kte,nt )                    , &
          intent(inout)  ::                                                 f2
 !
    real :: fk
