@@ -180,6 +180,9 @@
  xam_g = PI*deng/6.
  xbm_g = 3.
  xmu_g = 0.
+ xam_h = PI*700./6.
+ xbm_h = 3.
+ xmu_h = 0.
 
  call radar_init
 
