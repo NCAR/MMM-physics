@@ -38,12 +38,15 @@
               mixingrulestring_s, matrixstring_s, inclusionstring_s,   &
               hoststring_s, hostmatrixstring_s, hostinclusionstring_s, &
               mixingrulestring_g, matrixstring_g, inclusionstring_g,   &
-              hoststring_g, hostmatrixstring_g, hostinclusionstring_g
+              hoststring_g, hostmatrixstring_g, hostinclusionstring_g, &
+              mixingrulestring_h, matrixstring_h, inclusionstring_h,   &
+              hoststring_h, hostmatrixstring_h, hostinclusionstring_h
 
  complex(kind=R8KIND),public:: m_w_0, m_i_0
 
  double precision,dimension(nrbins+1),public:: xxdx
  double precision,dimension(nrbins),public:: xxds,xdts,xxdg,xdtg
+ DOUBLE PRECISION,DIMENSION(nrbins),PUBLIC:: xxDh,xdth
  double precision,parameter,public:: lamda_radar = 0.10           ! in meters
  double precision,public:: k_w,pi5,lamda4
 
@@ -51,11 +54,12 @@
  double precision, dimension(3), parameter, public:: basis =       &
                            (/1.d0/3.d0, 4.d0/3.d0, 1.d0/3.d0/)
 
- real(kind=kind_phys),public,dimension(4):: xcre,xcse,xcge,xcrg,xcsg,xcgg
+ real(kind=kind_phys),public,dimension(4):: xcre,xcse,xcge,xche,xcrg,xcsg,xcgg,xchg
  real(kind=kind_phys),public:: xam_r,xbm_r,xmu_r,xobmr
  real(kind=kind_phys),public:: xam_s,xbm_s,xmu_s,xoams,xobms,xocms
  real(kind=kind_phys),public:: xam_g,xbm_g,xmu_g,xoamg,xobmg,xocmg
- real(kind=kind_phys),public:: xorg2,xosg2,xogg2
+ REAL(kind=kind_phys),PUBLIC:: xam_h, xbm_h, xmu_h, xoamh, xobmh, xocmh
+ real(kind=kind_phys),public:: xorg2,xosg2,xogg2,xohg2
 
 
 !..Single melting snow/graupel particle 90% meltwater on external sfc
@@ -63,6 +67,7 @@
 
  double precision,parameter,public:: melt_outside_s = 0.9d0
  double precision,parameter,public:: melt_outside_g = 0.9d0
+ double precision,parameter,public:: melt_outside_h = 0.9d0
 
 
  contains
@@ -105,6 +110,12 @@
     hoststring_g(n:n) = char(0)
     hostmatrixstring_g(n:n) = char(0)
     hostinclusionstring_g(n:n) = char(0)
+    mixingrulestring_h(n:n) = char(0)
+    matrixstring_h(n:n) = char(0)
+    inclusionstring_h(n:n) = char(0)
+    hoststring_h(n:n) = char(0)
+    hostmatrixstring_h(n:n) = char(0)
+    hostinclusionstring_h(n:n) = char(0)
  enddo
 
  mixingrulestring_s = 'maxwellgarnett'
@@ -120,6 +131,13 @@
  inclusionstring_g = 'spheroidal'
  hostmatrixstring_g = 'icewater'
  hostinclusionstring_g = 'spheroidal'
+
+ mixingrulestring_h = 'maxwellgarnett'
+ hoststring_h = 'air'
+ matrixstring_h = 'water'
+ inclusionstring_h = 'spheroidal'
+ hostmatrixstring_h = 'icewater'
+ hostinclusionstring_h = 'spheroidal'
 
 !..Create bins of snow (from 100 microns up to 2 cm).
  xxdx(1) = 100.d-6
@@ -143,6 +161,17 @@
  do n = 1, nrbins
     xxdg(n) = dsqrt(xxdx(n)*xxdx(n+1))
     xdtg(n) = xxdx(n+1) - xxdx(n)
+ enddo
+!..Create bins of hail (from 100 microns up to 5 cm).
+ xxDx(1) = 100.D-6
+ xxDx(nrbins+1) = 0.05d0
+ do n = 2, nrbins
+    xxdx(n) = dexp(real(n-1,kind=R8KIND)/real(nrbins,kind=R8KIND) &
+            * dlog(xxdx(nrbins+1)/xxdx(1)) +dlog(xxdx(1)))
+ enddo
+ do n = 1, nrbins
+    xxDh(n) = DSQRT(xxDx(n)*xxDx(n+1))
+    xdth(n) = xxDx(n+1) - xxDx(n)
  enddo
 
 
@@ -178,6 +207,15 @@
  enddo
  xogg2 = 1./xcgg(2)
 
+ xche(1) = 1. + xbm_h
+ xche(2) = 1. + xmu_h
+ xche(3) = 4. + xmu_h
+ xche(4) = 7. + xmu_h
+ do n = 1, 4
+    xchg(n) = wgamma(xche(n))
+ enddo
+ xohg2 = 1./xchg(2)
+
  xobmr = 1./xbm_r
  xoams = 1./xam_s
  xobms = 1./xbm_s
@@ -185,6 +223,9 @@
  xoamg = 1./xam_g
  xobmg = 1./xbm_g
  xocmg = xoamg**xobmg
+ xoamh = 1./xam_h
+ xobmh = 1./xbm_h
+ xocmh = xoamh**xobmh
 
  end subroutine radar_init
 
