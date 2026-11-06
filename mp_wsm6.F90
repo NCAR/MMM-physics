@@ -529,21 +529,22 @@
    do k = kts, kte
      do i = its, ite
        tr=ttp/t(i,k)
-       qsat(i,k,1)=psat*exp(log(tr)*(xa))*exp(xb*(1.-tr))
+       temp=log(tr)
+       qsat(i,k,1)=psat*exp(temp*(xa))*exp(xb*(1.-tr))
        qsat(i,k,1) = min(qsat(i,k,1),0.99*p(i,k))
        qsat(i,k,1) = ep2 * qsat(i,k,1) / (p(i,k) - qsat(i,k,1))
        qsat(i,k,1) = max(qsat(i,k,1),qmin)
        rh(i,k,1) = max(q(i,k) / qsat(i,k,1),qmin)
-       tr=ttp/t(i,k)
        if(t(i,k).lt.ttp) then
-         qsat(i,k,2)=psat*exp(log(tr)*(xai))*exp(xbi*(1.-tr))
+         qsat(i,k,2)=psat*exp(temp*(xai))*exp(xbi*(1.-tr))
+         qsat(i,k,2) = min(qsat(i,k,2),0.99*p(i,k))
+         qsat(i,k,2) = ep2 * qsat(i,k,2) / (p(i,k) - qsat(i,k,2))
+         qsat(i,k,2) = max(qsat(i,k,2),qmin)
+         rh(i,k,2) = max(q(i,k) / qsat(i,k,2),qmin)
        else
-         qsat(i,k,2)=psat*exp(log(tr)*(xa))*exp(xb*(1.-tr))
+         qsat(i,k,2) = qsat(i,k,1)
+         rh(i,k,2) = rh(i,k,1)
        endif
-       qsat(i,k,2) = min(qsat(i,k,2),0.99*p(i,k))
-       qsat(i,k,2) = ep2 * qsat(i,k,2) / (p(i,k) - qsat(i,k,2))
-       qsat(i,k,2) = max(qsat(i,k,2),qmin)
-       rh(i,k,2) = max(q(i,k) / qsat(i,k,2),qmin)
      enddo
    enddo
 !
@@ -663,9 +664,7 @@
 !
    do k = kte, kts, -1
      do i = its, ite
-       supcol = t0c-t(i,k)
-       n0sfac(i,k) = max(min(exp(alpha*supcol),n0smax/n0s),1.)
-       if(t(i,k).gt.t0c) then
+       if(t(i,k).gt.t0c .and. (qs(i,k).gt.0. .or. qg(i,k).gt.0.)) then
 !---------------------------------------------------------------
 ! psmlt: melting of snow [HL A33] [RH83 A25]
 !       (T>T0: S->R)
@@ -675,7 +674,7 @@
          if(qs(i,k).gt.0.) then
            coeres = rslope2(i,k,2)*sqrt(rslope(i,k,2)*rslopeb(i,k,2))
            psmlt(i,k) = xka(t(i,k),den(i,k))/xlf*(t0c-t(i,k))*pi/2.         &
-                      *n0sfac(i,k)*(precs1*rslope2(i,k,2)                   &
+                      *(precs1*rslope2(i,k,2)                               &
                       +precs2*work2(i,k)*coeres)/den(i,k)
            psmlt(i,k) = min(max(psmlt(i,k)*dtcld/mstep(i),                  &
                       -qs(i,k)/mstep(i)),0.)
@@ -849,9 +848,13 @@
 !
    do k = kts, kte
      do i = its, ite
-       work1(i,k,1) = diffac(xl(i,k),p(i,k),t(i,k),den(i,k),qsat(i,k,1))
-       work1(i,k,2) = diffac(xls,p(i,k),t(i,k),den(i,k),qsat(i,k,2))
-       work2(i,k) = venfac(p(i,k),t(i,k),den(i,k))
+       ! diffac and venfac inlined so diffus and viscos are evaluated once per point
+       a = diffus(t(i,k),p(i,k))
+       b = viscos(t(i,k),den(i,k))
+       c = 1.414e3*b*den(i,k)*rv*t(i,k)*t(i,k)
+       work1(i,k,1) = den(i,k)*xl(i,k)*xl(i,k)/c+1./(qsat(i,k,1)*a)
+       work1(i,k,2) = den(i,k)*xls*xls/c+1./(qsat(i,k,2)*a)
+       work2(i,k) = exp(log((b/a))*((.3333333)))/sqrt(b)*sqrt(sqrt(den0/den(i,k)))
      enddo
    enddo
 !
@@ -917,7 +920,11 @@
    do k = kts, kte
      do i = its, ite
        supcol = t0c-t(i,k)
-       n0sfac(i,k) = max(min(exp(alpha*supcol),n0smax/n0s),1.)
+       if(supcol.le.0.) then
+         n0sfac(i,k) = 1.
+       else
+         n0sfac(i,k) = max(min(exp(alpha*supcol),n0smax/n0s),1.)
+       endif
        supsat = max(q(i,k),qmin)-qsat(i,k,2)
        satdt = supsat/dtcld
        ifsat = 0
@@ -929,11 +936,9 @@
        temp = (den(i,k)*max(qi(i,k),qmin))
        temp = sqrt(sqrt(temp*temp*temp))
        xni(i,k) = min(max(5.38e7*temp,1.e3),1.e6)
-       eacrs = exp(0.07*(-supcol))
 !
        xmi = den(i,k)*qi(i,k)/xni(i,k)
        diameter  = min(dicon * sqrt(xmi),dimax)
-       vt2i = 1.49e4*diameter**1.31
        vt2r=pvtr*rslopeb(i,k,1)*denfac(i,k)
        vt2s=pvts*rslopeb(i,k,2)*denfac(i,k)
        vt2g=pvtg*rslopeb(i,k,3)*denfac(i,k)
@@ -944,6 +949,8 @@
          vt2ave=0.
        endif
        if(supcol.gt.0.and.qi(i,k).gt.qmin) then
+         eacrs = exp(0.07*(-supcol))
+         vt2i = 1.49e4*diameter**1.31
          if(qr(i,k).gt.qcrmin) then
 !-------------------------------------------------------------
 ! praci: accretion of cloud ice by rain [HL A15] [LFO 25]
@@ -982,7 +989,7 @@
 !        (T<T0: I->G)
 !-------------------------------------------------------------
          if(qg(i,k).gt.qcrmin) then
-           egi = exp(0.07*(-supcol))
+           egi = eacrs
            acrfac = 2.*rslope3(i,k,3)+2.*diameter*rslope2(i,k,3)            &
                   + diameter**2*rslope(i,k,3)
            pgaci(i,k) = pi*egi*qi(i,k)*n0g*abs(vt2ave-vt2i)*acrfac/4.
@@ -1402,19 +1409,19 @@
    do k = kts, kte
      do i = its, ite
        tr=ttp/t(i,k)
-       qsat(i,k,1)=psat*exp(log(tr)*(xa))*exp(xb*(1.-tr))
+       temp=log(tr)
+       qsat(i,k,1)=psat*exp(temp*(xa))*exp(xb*(1.-tr))
        qsat(i,k,1) = min(qsat(i,k,1),0.99*p(i,k))
        qsat(i,k,1) = ep2 * qsat(i,k,1) / (p(i,k) - qsat(i,k,1))
        qsat(i,k,1) = max(qsat(i,k,1),qmin)
-       tr=ttp/t(i,k)
        if(t(i,k).lt.ttp) then
-         qsat(i,k,2)=psat*exp(log(tr)*(xai))*exp(xbi*(1.-tr))
+         qsat(i,k,2)=psat*exp(temp*(xai))*exp(xbi*(1.-tr))
+         qsat(i,k,2) = min(qsat(i,k,2),0.99*p(i,k))
+         qsat(i,k,2) = ep2 * qsat(i,k,2) / (p(i,k) - qsat(i,k,2))
+         qsat(i,k,2) = max(qsat(i,k,2),qmin)
        else
-         qsat(i,k,2)=psat*exp(log(tr)*(xa))*exp(xb*(1.-tr))
+         qsat(i,k,2) = qsat(i,k,1)
        endif
-       qsat(i,k,2) = min(qsat(i,k,2),0.99*p(i,k))
-       qsat(i,k,2) = ep2 * qsat(i,k,2) / (p(i,k) - qsat(i,k,2))
-       qsat(i,k,2) = max(qsat(i,k,2),qmin)
      enddo
    enddo
 !
@@ -1539,8 +1546,7 @@
  integer:: i,k
 
  real(kind=kind_phys),parameter:: t0c = 273.15
- real(kind=kind_phys):: lamdar,lamdas,lamdag,x,y,z,supcol
- real(kind=kind_phys),dimension(its:ite,kts:kte):: n0sfac
+ real(kind=kind_phys):: lamdar,lamdas,lamdag,x,y,z,supcol,n0sfac
 
 !-----------------------------------------------------------------------------------------------------------------
 
@@ -1552,11 +1558,6 @@
 
  do k = kts, kte
    do i = its, ite
-     supcol = t0c-t(i,k)
-!---------------------------------------------------------------
-! n0s: Intercept parameter for snow [m-4] [HDC 6]
-!---------------------------------------------------------------
-     n0sfac(i,k) = max(min(exp(alpha*supcol),n0smax/n0s),1.)
      if(qrs(i,k,1).le.qcrmin)then
        rslope(i,k,1) = rslopermax
        rslopeb(i,k,1) = rsloperbmax
@@ -1574,7 +1575,12 @@
        rslope2(i,k,2) = rslopes2max
        rslope3(i,k,2) = rslopes3max
      else
-       rslope(i,k,2) = 1./lamdas(qrs(i,k,2),den(i,k),n0sfac(i,k))
+       supcol = t0c-t(i,k)
+!---------------------------------------------------------------
+! n0s: Intercept parameter for snow [m-4] [HDC 6]
+!---------------------------------------------------------------
+       n0sfac = max(min(exp(alpha*supcol),n0smax/n0s),1.)
+       rslope(i,k,2) = 1./lamdas(qrs(i,k,2),den(i,k),n0sfac)
        rslopeb(i,k,2) = rslope(i,k,2)**bvts
        rslope2(i,k,2) = rslope(i,k,2)*rslope(i,k,2)
        rslope3(i,k,2) = rslope2(i,k,2)*rslope(i,k,2)
@@ -1619,7 +1625,6 @@
 
  real(kind=kind_phys),parameter:: t0c = 273.15
  real(kind=kind_phys):: lamdar,x,y
- real(kind=kind_phys),dimension(its:ite,kts:kte):: n0sfac
 
 !-----------------------------------------------------------------------------------------------------------------
 
@@ -1664,8 +1669,7 @@
  integer:: i,k
 
  real(kind=kind_phys),parameter:: t0c = 273.15
- real(kind=kind_phys):: lamdas,x,y,z,supcol
- real(kind=kind_phys),dimension(its:ite,kts:kte):: n0sfac
+ real(kind=kind_phys):: lamdas,x,y,z,supcol,n0sfac
 
 !-----------------------------------------------------------------------------------------------------------------
 
@@ -1675,18 +1679,18 @@
 !
  do k = kts, kte
    do i = its, ite
-     supcol = t0c-t(i,k)
-!---------------------------------------------------------------
-! n0s: Intercept parameter for snow [m-4] [HDC 6]
-!---------------------------------------------------------------
-     n0sfac(i,k) = max(min(exp(alpha*supcol),n0smax/n0s),1.)
      if(qrs(i,k).le.qcrmin)then
        rslope(i,k) = rslopesmax
        rslopeb(i,k) = rslopesbmax
        rslope2(i,k) = rslopes2max
        rslope3(i,k) = rslopes3max
      else
-       rslope(i,k) = 1./lamdas(qrs(i,k),den(i,k),n0sfac(i,k))
+       supcol = t0c-t(i,k)
+!---------------------------------------------------------------
+! n0s: Intercept parameter for snow [m-4] [HDC 6]
+!---------------------------------------------------------------
+       n0sfac = max(min(exp(alpha*supcol),n0smax/n0s),1.)
+       rslope(i,k) = 1./lamdas(qrs(i,k),den(i,k),n0sfac)
        rslopeb(i,k) = rslope(i,k)**bvts
        rslope2(i,k) = rslope(i,k)*rslope(i,k)
        rslope3(i,k) = rslope2(i,k)*rslope(i,k)
@@ -1716,7 +1720,6 @@
 
  real(kind=kind_phys),parameter:: t0c = 273.15
  real(kind=kind_phys):: lamdag,x,y
- real(kind=kind_phys),dimension(its:ite,kts:kte):: n0sfac
 
 !-----------------------------------------------------------------------------------------------------------------
 
