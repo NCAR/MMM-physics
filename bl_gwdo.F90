@@ -148,6 +148,7 @@
                         efacmax = 10.    ,&  !< maximum of enhancement factor
                         frc     = 1.0    ,&  !< critical Froude number
                         frmax   = 10.    ,&  !< maximum of Frounde number
+                        nhe_frmin = 1.e-5,&  !< minimum of Frounde number nhe
                         ce      = 0.8    ,&  !< paramter from mesoscacle model
                         cg      = 1.     ,&  !< paramter from mesoscacle model
                         var_min = 10.    ,&  !< minimum of standard deviation [m]
@@ -174,6 +175,8 @@
    real(kind=kind_phys), dimension(its:ite)           ::                                       &
                          dusfc, dvsfc, coefm, taub, xn, yn, ubar, vbar, fr, ulow, rulow, bnv,  &
                          oa, ol, oc, rhobar, brvf, delks,delks1, zref, dx_eff
+   real(kind=kind_phys), dimension(its:ite)           ::                                       &
+                         nhe_ol, nhe_fr
 !
    real(kind=kind_phys), dimension(its:ite,kts:kte)   ::                                       &
                          dudt, dvdt, dtaux2d, dtauy2d
@@ -244,7 +247,7 @@
    usqj    = 0.      ; bnv2   = 0.      ; vtj     = 0.     ; vtk     = 0.
    taup    = 0.      ; taud   = 0.      ; dtaux2d = 0.     ; dtauy2d = 0.
    dtfac   = 1.0     ; xlinv  = 1.0     ; denfac =  1.0
-   nhd_effect = 1.0
+   nhd_effect = 1.0  ; nhe_ol = 1.0     ; nhe_fr = 1.
 !
    do k = kts,kte
      do i = its,ite
@@ -413,7 +416,6 @@
    enddo
 !
    do i = its,ite
-     ldrag(i) = omax(i) <= hmt_min               ! no drag when too small mtn
      ldrag(i) = ldrag(i) .or. var(i) <= 0.       ! no drag when too small std
      ldrag(i) = ldrag(i) .or. velco(i,1)<=0.     ! no drag when critical level
      ldrag(i) = ldrag(i) .or. ulow(i)==1.0       ! no drag when wind calms
@@ -481,10 +483,14 @@
        taub(i)  = rhobar(i) * efac * xlinv * gfac * ulow(i)*ulow(i)*ulow(i)    &
                   / bnv(i)
        if (if_nonhyd) then
-         tem = fr(i) * fr(i)
-         nhd_effect = -9./8.*tem + exp(-2./fr(i))                              &
-                   *(-5./4./tem-0.5/fr(i)+5./4.+9./4.*fr(i)+9./8.*tem)
-         taub(i)  = taub(i) * (1.+nhd_effect)
+         nhe_ol(i) = dx_eff(i)/(2*coefm(i))          !half width of SSO
+         nhe_ol(i) = max(nhe_ol(i),olmin)
+         nhe_fr(i) = ulow(i) / (bnv(i) * nhe_ol(i))  !horizontal froude number
+         nhe_fr(i) = max(nhe_fr(i),nhe_frmin)
+         tem = nhe_fr(i) * nhe_fr(i)
+         nhd_effect = -9./8.*tem + exp(-2./nhe_fr(i))                          &
+                   *(-5./4./tem-0.5/nhe_fr(i)+5./4.+9./4.*nhe_fr(i)+9./8.*tem)
+         taub(i)  = taub(i) * (1.+max(nhd_effect,-1.))
        endif
      else
        taub(i) = 0.
