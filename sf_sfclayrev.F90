@@ -777,7 +777,7 @@
     endif
 ! TO PREVENT OSCILLATIONS AVERAGE WITH OLD VALUE 
     if ( (if_kim_tofd) .and. (cf(i).gt.1.e-20) ) then
-      ust(i)=0.5*ust(i)+0.5*karman*wspd(i)/psix+0.5*sqrt(cf(i))*wspd(i)                                             
+      ust(i)=0.5*ust(i)+0.5*sqrt((karman/psix)**2+cf(i))*wspd(i)
     else
       ust(i)=0.5*ust(i)+0.5*karman*wspd(i)/psix                                             
     endif
