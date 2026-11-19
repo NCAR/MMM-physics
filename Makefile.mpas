@@ -17,6 +17,7 @@ OBJS = \
 	mp_radar.o \
 	mp_wsm6_effectRad.o \
 	mp_wsm6.o \
+	mp_udm.o \
 	mynn_shared.o \
 	sf_mynn.o \
 	sf_sfclayrev.o \
@@ -41,6 +42,10 @@ mp_wsm6.o: \
 	mp_radar.o \
 	module_libmassv.o
 
+mp_udm.o: \
+	mp_radar.o \
+	module_libmassv.o
+
 sf_mynn.o: \
 	mynn_shared.o
 
@@ -49,10 +54,6 @@ clean:
 	@# Certain systems with intel compilers generate *.i files
 	@# This removes them during the clean process
 	$(RM) *.i
-
-# Cancel the built-in implicit rule for Modula-2 files (.mod) to avoid having
-# make try to create .o files from Fortran .mod files
-%.o : %.mod
 
 .F90.o:
 ifeq "$(GEN_F90)" "true"
