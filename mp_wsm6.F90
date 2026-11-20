@@ -401,6 +401,11 @@
             xlf, pfrzdtc, pfrzdtr, supice, alpha2, delta2, delta3
  real(kind=kind_phys):: vt2ave
  real(kind=kind_phys):: holdc, holdci
+!volatile: each tendency times dtcld is stored here before it is added to a
+!mixing ratio, so that the compiler cannot fuse the multiply and the add into
+!one FMA. The updates of qc, qr, qi, qs and qg are then the same with and
+!without FMA contraction.
+ real(kind=kind_phys),volatile:: fma_tmp
  integer:: i, j, k, mstepmax,                                     &
            iprt, latd, lond, loop, loops, ifsat, n, idim, kdim
 
@@ -1293,24 +1298,31 @@
          work2(i,k)=-(prevp(i,k)+psdep(i,k)+pgdep(i,k)+pigen(i,k)+pidep(i,k))
 ! update
          q(i,k) = q(i,k)+work2(i,k)*dtcld
-         qc(i,k) = max(qc(i,k)-(praut(i,k)+pracw(i,k)                       &
-                 + paacw(i,k)+paacw(i,k))*dtcld,0.)
-         qr(i,k) = max(qr(i,k)+(praut(i,k)+pracw(i,k)                       &
+!the tendency times dtcld goes through the volatile fma_tmp so that it is not
+!fused with the add into an FMA (see the declaration of fma_tmp).
+         fma_tmp = (praut(i,k)+pracw(i,k)                                   &
+                 + paacw(i,k)+paacw(i,k))*dtcld
+         qc(i,k) = max(qc(i,k)-fma_tmp,0.)
+         fma_tmp = (praut(i,k)+pracw(i,k)                                   &
                  + prevp(i,k)-piacr(i,k)-pgacr(i,k)                         &
-                 - psacr(i,k))*dtcld,0.)
-         qi(i,k) = max(qi(i,k)-(psaut(i,k)+praci(i,k)                       &
+                 - psacr(i,k))*dtcld
+         qr(i,k) = max(qr(i,k)+fma_tmp,0.)
+         fma_tmp = (psaut(i,k)+praci(i,k)                                   &
                  + psaci(i,k)+pgaci(i,k)-pigen(i,k)-pidep(i,k))             &
-                 * dtcld,0.)
-         qs(i,k) = max(qs(i,k)+(psdep(i,k)+psaut(i,k)+paacw(i,k)            &
+                 * dtcld
+         qi(i,k) = max(qi(i,k)-fma_tmp,0.)
+         fma_tmp = (psdep(i,k)+psaut(i,k)+paacw(i,k)                        &
                  - pgaut(i,k)+piacr(i,k)*delta3                             &
                  + praci(i,k)*delta3+psaci(i,k)-pgacs(i,k)                  &
                  - pracs(i,k)*(1.-delta2)+psacr(i,k)*delta2)                &
-                 * dtcld,0.)
-         qg(i,k) = max(qg(i,k)+(pgdep(i,k)+pgaut(i,k)                       &
+                 * dtcld
+         qs(i,k) = max(qs(i,k)+fma_tmp,0.)
+         fma_tmp = (pgdep(i,k)+pgaut(i,k)                                   &
                  + piacr(i,k)*(1.-delta3)                                   &
                  + praci(i,k)*(1.-delta3)+psacr(i,k)*(1.-delta2)            &
                  + pracs(i,k)*(1.-delta2)+pgaci(i,k)+paacw(i,k)             &
-                 + pgacr(i,k)+pgacs(i,k))*dtcld,0.)
+                 + pgacr(i,k)+pgacs(i,k))*dtcld
+         qg(i,k) = max(qg(i,k)+fma_tmp,0.)
          xlf = xls-xl(i,k)
          xlwork2 = -xls*(psdep(i,k)+pgdep(i,k)+pidep(i,k)+pigen(i,k))       &
                    -xl(i,k)*prevp(i,k)-xlf*(piacr(i,k)+paacw(i,k)           &
@@ -1369,15 +1381,21 @@
          work2(i,k)=-(prevp(i,k)+psevp(i,k)+pgevp(i,k))
 ! update
          q(i,k) = q(i,k)+work2(i,k)*dtcld
-         qc(i,k) = max(qc(i,k)-(praut(i,k)+pracw(i,k)                       &
-                 + paacw(i,k)+paacw(i,k))*dtcld,0.)
-         qr(i,k) = max(qr(i,k)+(praut(i,k)+pracw(i,k)                       &
+!the tendency times dtcld goes through the volatile fma_tmp so that it is not
+!fused with the add into an FMA (see the declaration of fma_tmp).
+         fma_tmp = (praut(i,k)+pracw(i,k)                                   &
+                 + paacw(i,k)+paacw(i,k))*dtcld
+         qc(i,k) = max(qc(i,k)-fma_tmp,0.)
+         fma_tmp = (praut(i,k)+pracw(i,k)                                   &
                  + prevp(i,k)+paacw(i,k)+paacw(i,k)-pseml(i,k)              &
-               - pgeml(i,k))*dtcld,0.)
-         qs(i,k) = max(qs(i,k)+(psevp(i,k)-pgacs(i,k)                       &
-                 + pseml(i,k))*dtcld,0.)
-         qg(i,k) = max(qg(i,k)+(pgacs(i,k)+pgevp(i,k)                       &
-                 + pgeml(i,k))*dtcld,0.)
+                 - pgeml(i,k))*dtcld
+         qr(i,k) = max(qr(i,k)+fma_tmp,0.)
+         fma_tmp = (psevp(i,k)-pgacs(i,k)                                   &
+                 + pseml(i,k))*dtcld
+         qs(i,k) = max(qs(i,k)+fma_tmp,0.)
+         fma_tmp = (pgacs(i,k)+pgevp(i,k)                                   &
+                 + pgeml(i,k))*dtcld
+         qg(i,k) = max(qg(i,k)+fma_tmp,0.)
          xlf = xls-xl(i,k)
          xlwork2 = -xl(i,k)*(prevp(i,k)+psevp(i,k)+pgevp(i,k))              &
                    -xlf*(pseml(i,k)+pgeml(i,k))
