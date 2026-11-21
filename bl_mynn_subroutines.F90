@@ -5931,8 +5931,8 @@ SUBROUTINE DDMF_JPL(kts,kte,dt,zw,dz,p,              &
             DOWNW,DOWNTHL,DOWNQT,DOWNQC,DOWNA,DOWNU,DOWNV,DOWNTHV
 
   ! entrainment variables
-        real(kind_phys), dimension(KTS+1:KTE+1,1:NDOWN) :: ENT,ENTf
-        integer,         dimension(KTS+1:KTE+1,1:NDOWN) :: ENTi
+        real(kind_phys), dimension(KTS:KTE+1,1:NDOWN) :: ENT,ENTf
+        integer,         dimension(KTS:KTE+1,1:NDOWN) :: ENTi
 
   ! internal variables
         integer :: K,I,ki, kminrad, qlTop, p700_ind, qlBase
@@ -6232,12 +6232,12 @@ SUBROUTINE DDMF_JPL(kts,kte,dt,zw,dz,p,              &
    ! Even though downdraft starts at different height, average all up to qlTop
    DO k=qlTop,KTS,-1
       DO I=1,NDOWN
-         edmf_a_dd(K)  =edmf_a_dd(K)  +DOWNA(K-1,I)
-         edmf_w_dd(K)  =edmf_w_dd(K)  +DOWNA(K-1,I)*DOWNW(K-1,I)
-         edmf_qt_dd(K) =edmf_qt_dd(K) +DOWNA(K-1,I)*DOWNQT(K-1,I)
-         edmf_thl_dd(K)=edmf_thl_dd(K)+DOWNA(K-1,I)*DOWNTHL(K-1,I)
-         edmf_ent_dd(K)=edmf_ent_dd(K)+DOWNA(K-1,I)*ENT(K-1,I)
-         edmf_qc_dd(K) =edmf_qc_dd(K) +DOWNA(K-1,I)*DOWNQC(K-1,I)
+         edmf_a_dd(K)  =edmf_a_dd(K)  +DOWNA(K,I)
+         edmf_w_dd(K)  =edmf_w_dd(K)  +DOWNA(K,I)*DOWNW(K,I)
+         edmf_qt_dd(K) =edmf_qt_dd(K) +DOWNA(K,I)*DOWNQT(K,I)
+         edmf_thl_dd(K)=edmf_thl_dd(K)+DOWNA(K,I)*DOWNTHL(K,I)
+         edmf_ent_dd(K)=edmf_ent_dd(K)+DOWNA(K,I)*ENT(K,I)
+         edmf_qc_dd(K) =edmf_qc_dd(K) +DOWNA(K,I)*DOWNQC(K,I)
       ENDDO
 
       IF (edmf_a_dd(k) >0.) THEN
